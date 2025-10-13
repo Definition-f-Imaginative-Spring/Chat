@@ -13,7 +13,6 @@ import (
 )
 
 func main() {
-
 	var conn net.Conn
 	var err error
 	var success bool
