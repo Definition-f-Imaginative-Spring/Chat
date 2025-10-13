@@ -3,6 +3,7 @@ package main
 import (
 	"Chat/client/clitool"
 	"Chat/server/ConnectManager"
+	"Chat/server/sertool"
 	"bufio"
 	"fmt"
 	"net"
@@ -12,33 +13,29 @@ import (
 )
 
 func main() {
-	reader := bufio.NewReader(os.Stdin)
 
 	var conn net.Conn
 	var err error
 	var success bool
-
+	reader := bufio.NewReader(os.Stdin)
 	for {
-
 		conn, err = net.Dial("tcp", "127.0.0.1:8080")
 		if err != nil {
-			panic(err)
+			sertool.Close(conn)
+			continue
 		}
 		fmt.Println("先选模式")
 		fmt.Println("1=注册，2=登录")
 		module, err := reader.ReadString('\n')
 		if err != nil {
 			fmt.Println(err)
+			sertool.Close(conn)
 			continue
 		}
 		module = strings.TrimSpace(module)
 		if err := ConnectManager.SendWithPrefix(conn, module); err != nil {
 			fmt.Println("发送用户模式:", err)
-			err := conn.Close()
-			if err != nil {
-				fmt.Println("close err:", err)
-				return
-			}
+			sertool.Close(conn)
 			continue
 		}
 
@@ -46,6 +43,7 @@ func main() {
 		case "1":
 			ok := clitool.InputUI(conn, reader)
 			if !ok {
+				sertool.Close(conn)
 				continue
 			}
 			success = clitool.Register(conn)
@@ -53,11 +51,13 @@ func main() {
 		case "2":
 			ok := clitool.InputUI(conn, reader)
 			if !ok {
+				sertool.Close(conn)
 				continue
 			}
 			success = clitool.Login(conn)
 		default:
 			fmt.Println("无效模式，1=注册，2=登录")
+			sertool.Close(conn)
 			continue
 		}
 

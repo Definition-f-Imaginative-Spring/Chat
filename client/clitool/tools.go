@@ -6,7 +6,6 @@ import (
 	"bufio"
 	"fmt"
 	"net"
-	"os"
 	"strings"
 	"time"
 )
@@ -64,7 +63,6 @@ func Recv(conn net.Conn) string {
 		msg, err := ConnectManager.ReadMessage(conn)
 		if err != nil {
 			fmt.Println("服务器断开:", err)
-			os.Exit(0)
 		}
 		fmt.Println("[收到] ", msg)
 	}
@@ -126,53 +124,4 @@ func InputUI(conn net.Conn, reader *bufio.Reader) bool {
 	}
 
 	return true
-}
-
-func StartClient(success bool, reader *bufio.Reader) {
-	for {
-		conn, err := net.Dial("tcp", "127.0.0.1:8080")
-		if err != nil {
-			panic(err)
-		}
-		fmt.Println("先选模式")
-		fmt.Println("1=注册，2=登录")
-		module, err := reader.ReadString('\n')
-		if err != nil {
-			fmt.Println(err)
-			continue
-		}
-		module = strings.TrimSpace(module)
-		if err := ConnectManager.SendWithPrefix(conn, module); err != nil {
-			fmt.Println("发送用户模式:", err)
-			err := conn.Close()
-			if err != nil {
-				fmt.Println("close err:", err)
-				return
-			}
-			continue
-		}
-
-		switch module {
-		case "1":
-			ok := InputUI(conn, reader)
-			if !ok {
-				continue
-			}
-			success = Register(conn)
-
-		case "2":
-			ok := InputUI(conn, reader)
-			if !ok {
-				continue
-			}
-			success = Login(conn)
-		default:
-			fmt.Println("无效模式，1=注册，2=登录")
-			continue
-		}
-
-		if success {
-			break
-		}
-	}
 }
