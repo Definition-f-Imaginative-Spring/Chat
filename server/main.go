@@ -17,7 +17,8 @@ func main() {
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
-		panic(err)
+		fmt.Println("连接出错")
+		return
 	}
 
 	defer func(listener net.Listener) {
