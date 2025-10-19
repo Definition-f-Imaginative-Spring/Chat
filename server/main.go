@@ -9,6 +9,12 @@ import (
 
 func main() {
 
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("主程序发生 panic: %v\n", err)
+		}
+	}()
+
 	err := db.InitDB()
 	if err != nil {
 		fmt.Println("连接数据库错误")
@@ -17,7 +23,7 @@ func main() {
 
 	listener, err := net.Listen("tcp", ":8080")
 	if err != nil {
-		fmt.Println("连接出错")
+		fmt.Println("连接出错", err)
 		return
 	}
 

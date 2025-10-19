@@ -1,6 +1,7 @@
 package ConnectManager
 
 import (
+	"Chat/db"
 	"fmt"
 	"strings"
 	"sync"
@@ -84,6 +85,14 @@ func (cm *ConnectManager) SendTo(target string, sender string, msg string) {
 
 // ListenRecv 监听单个用户的 RecvChan
 func (cm *ConnectManager) ListenRecv(conn *Connection) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("ListenRecv panic: %v\n", err)
+
+		}
+	}()
+
 	username := conn.Username
 
 	for msg := range conn.RecvChan {
@@ -95,6 +104,7 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 		if trimmed == "" {
 			continue
 		}
+
 		if trimmed == "/list" {
 			users := cm.ListUsers()
 			cm.SendTo(username, "系统", "在线用户: "+strings.Join(users, ", "))
@@ -109,6 +119,19 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 
 		if trimmed == "PING" {
 			conn.LastSeen = time.Now().Unix()
+			continue
+		}
+
+		if trimmed == "PAI" {
+			val, err := db.Allures()
+			if err != nil {
+				fmt.Println("获取活跃度排名错误")
+			}
+			cm.SendTo(username, "系统", "活跃度排名: ")
+			for v, user := range val {
+				x := fmt.Sprintf("第%d名 %s", v+1, user)
+				cm.SendTo(username, "系统", x)
+			}
 			continue
 		}
 
@@ -127,7 +150,16 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 
 		} else {
 			fmt.Printf("用户%s:%s\n", username, trimmed)
-			cm.Broadcast(username, trimmed)
+			_, err := db.AddStreamMessage("chat_stream", username, trimmed)
+			if err != nil {
+				fmt.Println("写入 Redis Stream 失败:", err)
+			}
+
+			err = db.IncrementRedis(username)
+			if err != nil {
+				fmt.Println("增加活跃度失败")
+				continue
+			}
 		}
 	}
 }
@@ -164,6 +196,13 @@ func (cm *ConnectManager) ListUsers() []string {
 func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec int64) {
 	ticker := time.NewTicker(interval)
 	go func() {
+
+		defer func() {
+			if err := recover(); err != nil {
+				fmt.Printf("TimeoutChecker panic: %v\n", err)
+			}
+		}()
+
 		for range ticker.C {
 			now := time.Now().Unix()
 
@@ -175,6 +214,45 @@ func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec
 				}
 			}
 
+		}
+	}()
+}
+
+// StartStreamConsumer 从stream流中读取消息
+func (cm *ConnectManager) StartStreamConsumer() {
+	streamName := "chat_stream"
+	groupName := "chat_group"
+	consumerName := fmt.Sprintf("server-%d", time.Now().UnixNano())
+
+	// 创建消费组（如果已存在就忽略）
+	_ = db.CreateStreamGroup(streamName, groupName)
+
+	go func() {
+		for {
+			// 阻塞读取 Stream 新消息
+			msgs, err := db.ReadGroupMessages(streamName, groupName, consumerName, 10, 5000)
+			if err != nil {
+				fmt.Println("Stream 消费错误:", err)
+				time.Sleep(time.Second)
+				continue
+			}
+			if len(msgs) == 0 {
+				continue
+			}
+
+			for _, msg := range msgs {
+				sender := msg.Values["sender"].(string)
+				content := msg.Values["message"].(string)
+
+				// 分发给所有在线用户
+				cm.Broadcast(sender, content)
+
+				// 确认消息已消费
+				err = db.AckStreamMessage(streamName, groupName, msg.ID)
+				if err != nil {
+					fmt.Println(err)
+				}
+			}
 		}
 	}()
 }

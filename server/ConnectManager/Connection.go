@@ -38,7 +38,12 @@ func NewConnection(conn net.Conn) *Connection {
 }
 
 func (c *Connection) ReadLoop() {
-	defer fmt.Println("ReadLoop exit")
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("ReadLoop panic: %v\n", err)
+		}
+		fmt.Println("ReadLoop exit")
+	}()
 
 	for {
 		msg, err := ReadMessage(c.Conn)
@@ -47,6 +52,7 @@ func (c *Connection) ReadLoop() {
 			c.Close()
 			return
 		}
+
 		select {
 		case c.RecvChan <- msg:
 		case <-c.QuitChan:
@@ -56,7 +62,12 @@ func (c *Connection) ReadLoop() {
 }
 
 func (c *Connection) WriteLoop() {
-	defer fmt.Println("WriteLoop exit")
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("WriteLoop panic: %v\n", err)
+		}
+		fmt.Println("WriteLoop exit")
+	}()
 
 	for {
 		select {

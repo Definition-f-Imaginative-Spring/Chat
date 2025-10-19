@@ -44,6 +44,7 @@ func (U *User) SelectAll(db *sql.DB) ([]User, error) {
 			fmt.Println(err)
 		}
 	}(ret)
+
 	var users []User
 	for ret.Next() {
 		var u User

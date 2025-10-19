@@ -10,6 +10,13 @@ import (
 
 // Register 注册
 func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
+
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("注册发生 panic: %v\n", err)
+		}
+	}()
+
 	user, bo := UserCreate(conn)
 
 	if bo {
@@ -22,7 +29,7 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		return
 	}
 
-	err := user.Insert(db.DB) // 调用 db 包方法
+	err := user.Insert(db.DB)
 	if err != nil {
 		fmt.Println("插入用户失败:", err)
 		err := conn.Close()
@@ -46,11 +53,22 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 
 	manager.AddUser(user.Name, c)
 
+	err = db.InsertRedis(user.Name)
+	if err != nil {
+		fmt.Println("插入redis失败")
+		return
+	}
+
 	fmt.Println("新用户连接:", user.Name)
 }
 
 // Login 登录
 func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("登录发生 panic: %v\n", err)
+		}
+	}()
 
 	user, bo := UserCreate(conn)
 	ok, err := user.Boolean(db.DB)
@@ -132,7 +150,7 @@ func UserCreate(conn net.Conn) (user db.User, bo bool) {
 func StartServer(listener net.Listener) {
 	manager := ConnectManager.NewConnectManager()
 	manager.StartTimeoutChecker(10*time.Second, 30)
-
+	go manager.StartStreamConsumer()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

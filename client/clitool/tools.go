@@ -12,6 +12,12 @@ import (
 
 // StartHeartbeat 启动心跳检测
 func StartHeartbeat(conn net.Conn, interval time.Duration) {
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("StartHeartbeat panic: %v\n", err)
+		}
+	}()
+
 	ticker := time.NewTicker(interval)
 	for range ticker.C {
 		if err := ConnectManager.SendWithPrefix(conn, "PING"); err != nil {
@@ -59,13 +65,23 @@ func Login(conn net.Conn) bool {
 
 // Recv 接收消息
 func Recv(conn net.Conn) string {
+
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("Recv panic: %v\n", err)
+		}
+	}()
+
 	for {
 		msg, err := ConnectManager.ReadMessage(conn)
 		if err != nil {
 			fmt.Println("服务器断开:", err)
+			fmt.Println("请输入/exit退出")
+			break
 		}
 		fmt.Println("[收到] ", msg)
 	}
+	return ""
 }
 
 // Send 消息处理

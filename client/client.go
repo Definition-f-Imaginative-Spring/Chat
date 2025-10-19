@@ -13,6 +13,13 @@ import (
 )
 
 func main() {
+
+	defer func() {
+		if err := recover(); err != nil {
+			fmt.Printf("主程序 panic: %v\n", err)
+		}
+	}()
+
 	var conn net.Conn
 	var err error
 	var success bool
@@ -66,6 +73,11 @@ func main() {
 	}
 
 	fmt.Println("已连接到服务器，输入消息后回车即可发送。")
+	fmt.Println("操作手册")
+	fmt.Println("输入PAI查看活跃度排名")
+	fmt.Println("输入/list获取在线用户列表")
+	fmt.Println("输入/exit退出客户端")
+
 	defer func(conn net.Conn) {
 		err := conn.Close()
 		if err != nil {
