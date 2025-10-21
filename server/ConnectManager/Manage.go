@@ -85,7 +85,6 @@ func (cm *ConnectManager) SendTo(target string, sender string, msg string) {
 
 // ListenRecv 监听单个用户的 RecvChan
 func (cm *ConnectManager) ListenRecv(conn *Connection) {
-
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("ListenRecv panic: %v\n", err)
@@ -95,92 +94,33 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 
 	username := conn.Username
 
-	for msg := range conn.RecvChan {
-		if msg != "PING" {
-			fmt.Println("DEBUG listenRecv 收到:", msg)
+	for content := range conn.RecvChan {
+		if content != "PING" {
+			fmt.Println("DEBUG listenRecv 收到:", content)
 		}
 
-		trimmed := strings.TrimSpace(msg)
+		trimmed := strings.TrimSpace(content)
 		if trimmed == "" {
 			continue
 		}
 
-		if trimmed == "/list" {
-			users := cm.ListUsers()
-			cm.SendTo(username, "系统", "在线用户: "+strings.Join(users, ", "))
+		msg := NewMsg(username, "false", trimmed)
+
+		bool1, bool2 := msg.Special(conn, cm)
+
+		if bool1 && !bool2 {
 			continue
 		}
 
-		if trimmed == "/exit" {
-			cm.SendTo(username, "系统", "你已退出")
-			cm.RemoveUser(username)
+		if bool2 {
 			break
 		}
 
-		if trimmed == "PING" {
-			conn.LastSeen = time.Now().Unix()
+		bool3 := msg.MessageHandle(cm)
+		if !bool3 {
 			continue
 		}
-
-		if trimmed == "PAI" {
-			val, err := db.Allures()
-			if err != nil {
-				fmt.Println("获取活跃度排名错误")
-			}
-			cm.SendTo(username, "系统", "活跃度排名: ")
-			for v, user := range val {
-				x := fmt.Sprintf("第%d名 %s", v+1, user)
-				cm.SendTo(username, "系统", x)
-			}
-			continue
-		}
-
-		if targetUser, content, isPrivate := ParsePrivateMessage(trimmed); isPrivate {
-			// 私聊
-			_, ok := cm.Connections[targetUser]
-
-			if ok {
-				fmt.Printf("用户%s私聊%s：%s\n", username, targetUser, content)
-				cm.SendTo(targetUser, username, content)
-			} else {
-				fmt.Println("不存在该用户")
-				cm.SendTo(username, "系统", fmt.Sprintf("用户%s不存在，私聊失败", targetUser))
-				continue
-			}
-
-		} else {
-			fmt.Printf("用户%s:%s\n", username, trimmed)
-			_, err := db.AddStreamMessage("chat_stream", username, trimmed)
-			if err != nil {
-				fmt.Println("写入 Redis Stream 失败:", err)
-			}
-
-			err = db.IncrementRedis(username)
-			if err != nil {
-				fmt.Println("增加活跃度失败")
-				continue
-			}
-		}
 	}
-}
-
-// ParsePrivateMessage 判断是否为私聊
-func ParsePrivateMessage(msg string) (string, string, bool) {
-	msg = strings.TrimSpace(msg)
-	if !strings.HasPrefix(msg, "[private]") || len(msg) <= 9 {
-		return "", "", false
-	}
-
-	// 去掉 [private] 前缀
-	message := msg[9:]
-	parts := strings.SplitN(message, ":", 2)
-	if len(parts) < 2 {
-		return "", "", true
-	}
-
-	targetUser := parts[0]
-	content := parts[1]
-	return targetUser, content, true
 }
 
 // ListUsers 获取在线用户列表

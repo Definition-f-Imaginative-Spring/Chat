@@ -37,6 +37,7 @@ func AddStreamMessage(streamName string, sender string, msg string) (string, err
 
 // ReadGroupMessages 从消费组中读取消息（阻塞模式）
 func ReadGroupMessages(streamName, groupName, consumerName string, count int64, blockMs int64) ([]redis.XMessage, error) {
+	//最多读count条，延时blockMs秒，从最后开始读
 	streams, err := Rdb.XReadGroup(streamCtx, &redis.XReadGroupArgs{
 		Group:    groupName,
 		Consumer: consumerName,

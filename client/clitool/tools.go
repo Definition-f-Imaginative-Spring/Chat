@@ -89,12 +89,6 @@ func Send(conn net.Conn, reader *bufio.Reader) {
 	for {
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimSpace(text)
-
-		if text == "/exit" {
-			fmt.Println("退出客户端。")
-			return
-		}
-
 		if err := ConnectManager.SendWithPrefix(conn, text); err != nil {
 			fmt.Println("发送失败:", err)
 			return

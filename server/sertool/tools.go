@@ -60,6 +60,7 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 	}
 
 	fmt.Println("新用户连接:", user.Name)
+
 }
 
 // Login 登录
@@ -90,6 +91,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		manager.AddUser(user.Name, c)
 
 		fmt.Println("欢迎:", user.Name)
+
 	} else {
 		err := ConnectManager.SendWithPrefix(conn, "密码或用户名错误")
 		if err != nil {
@@ -174,5 +176,6 @@ func StartServer(listener net.Listener) {
 		case "2":
 			go Login(conn, manager)
 		}
+
 	}
 }
