@@ -92,6 +92,15 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 
 		fmt.Println("欢迎:", user.Name)
 
+		message, err := user.GetLastMessage(db.DB)
+		if err != nil {
+			fmt.Println(err)
+		}
+		user.LastMessage = message
+
+		fmt.Println(user.LastMessage)
+		go manager.StartStreamConsumer(user)
+
 	} else {
 		err := ConnectManager.SendWithPrefix(conn, "密码或用户名错误")
 		if err != nil {
@@ -104,6 +113,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 			return
 		}
 	}
+
 }
 
 // Close  关闭conn
@@ -117,7 +127,7 @@ func Close(conn net.Conn) {
 }
 
 // UserCreate 创建User
-func UserCreate(conn net.Conn) (user db.User, bo bool) {
+func UserCreate(conn net.Conn) (user *db.User, bo bool) {
 	// 1. 读用户名
 	name, err := ConnectManager.ReadMessage(conn)
 	if err != nil {
@@ -134,7 +144,7 @@ func UserCreate(conn net.Conn) (user db.User, bo bool) {
 		return
 	}
 
-	user = db.User{
+	user = &db.User{
 		Name:     name,
 		Password: pwd,
 	}
@@ -152,7 +162,6 @@ func UserCreate(conn net.Conn) (user db.User, bo bool) {
 func StartServer(listener net.Listener) {
 	manager := ConnectManager.NewConnectManager()
 	manager.StartTimeoutChecker(10*time.Second, 30)
-	go manager.StartStreamConsumer()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

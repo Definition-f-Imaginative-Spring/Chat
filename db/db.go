@@ -9,9 +9,10 @@ import (
 var DB *sql.DB
 
 type User struct {
-	Id       int
-	Password string
-	Name     string
+	Id          int
+	Password    string
+	Name        string
+	LastMessage string
 }
 
 // InitDB 初始化数据库
@@ -118,4 +119,25 @@ func (U *User) Boolean(db *sql.DB) (bool, error) {
 
 	}
 	return U.Password == password, nil
+}
+
+// Update 更新最后一条消息
+func (U *User) Update(db *sql.DB) error {
+	_, err := db.Exec("UPDATE user SET Last_Message = ? WHERE Name = ?", U.LastMessage, U.Name)
+	if err != nil {
+		return fmt.Errorf("DB update error: %v", err)
+	}
+	return nil
+}
+
+// GetLastMessage 得到记录的消息ID
+func (U *User) GetLastMessage(db *sql.DB) (string, error) {
+	var lastMsg string
+	query := "SELECT Last_Message FROM user WHERE Name = ?"
+	err := db.QueryRow(query, U.Name).Scan(&lastMsg)
+	if err != nil {
+		return "", fmt.Errorf("GetLastMessage error: %v", err)
+	}
+	U.LastMessage = lastMsg
+	return lastMsg, nil
 }

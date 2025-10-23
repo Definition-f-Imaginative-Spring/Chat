@@ -21,7 +21,7 @@ func NewConnectManager() *ConnectManager {
 }
 
 // AddUser 添加新用户
-func (cm *ConnectManager) AddUser(username string, conn *Connection) bool {
+func (cm *ConnectManager) AddUser(username string, co *Connection) bool {
 	cm.Mutex.Lock()
 	defer cm.Mutex.Unlock()
 
@@ -29,12 +29,11 @@ func (cm *ConnectManager) AddUser(username string, conn *Connection) bool {
 		return false
 	}
 
-	conn.Username = username
-	cm.Connections[username] = conn
+	co.Username = username
+	cm.Connections[username] = co
+	go cm.ListenRecv(co)
 
-	go cm.ListenRecv(conn)
-
-	cm.Broadcast(username, fmt.Sprintf("%s 上线了", username))
+	BroadcastSendSystemMsg(fmt.Sprintf("%s 上线了", username), cm)
 
 	return true
 }
@@ -51,36 +50,7 @@ func (cm *ConnectManager) RemoveUser(username string) {
 	}
 	delete(cm.Connections, username)
 	conn.Close()
-
-	cm.Broadcast(username, fmt.Sprintf("%s 下线了", username))
-}
-
-// Broadcast 广播消息给所有用户（除了 sender）
-func (cm *ConnectManager) Broadcast(sender string, msg string) {
-
-	for username, conn := range cm.Connections {
-		select {
-		case conn.SendChan <- fmt.Sprintf("%s: %s", sender, msg):
-		default:
-			fmt.Println("send buffer full for", username)
-		}
-	}
-}
-
-// SendTo 私聊消息
-func (cm *ConnectManager) SendTo(target string, sender string, msg string) {
-
-	conn, ok := cm.Connections[target]
-	if !ok {
-		fmt.Println("user not online:", target)
-		return
-	}
-
-	select {
-	case conn.SendChan <- fmt.Sprintf("[私聊]%s: %s", sender, msg):
-	default:
-		fmt.Println("send buffer full for", target)
-	}
+	BroadcastSendSystemMsg(fmt.Sprintf("%s 下线了", username), cm)
 }
 
 // ListenRecv 监听单个用户的 RecvChan
@@ -88,7 +58,6 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("ListenRecv panic: %v\n", err)
-
 		}
 	}()
 
@@ -98,7 +67,7 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 		if content != "PING" {
 			fmt.Println("DEBUG listenRecv 收到:", content)
 		}
-
+		//特殊消息处理
 		trimmed := strings.TrimSpace(content)
 		if trimmed == "" {
 			continue
@@ -107,16 +76,15 @@ func (cm *ConnectManager) ListenRecv(conn *Connection) {
 		msg := NewMsg(username, "false", trimmed)
 
 		bool1, bool2 := msg.Special(conn, cm)
-
 		if bool1 && !bool2 {
 			continue
 		}
-
 		if bool2 {
 			break
 		}
-
-		bool3 := msg.MessageHandle(cm)
+		//聊天内容处理
+		msg.MessageHandle(cm)
+		bool3 := msg.Dispatch(cm)
 		if !bool3 {
 			continue
 		}
@@ -158,24 +126,20 @@ func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec
 	}()
 }
 
-// StartStreamConsumer 从stream流中读取消息
-func (cm *ConnectManager) StartStreamConsumer() {
+// StartStreamConsumer 消费流中消息
+func (cm *ConnectManager) StartStreamConsumer(user *db.User) {
 	streamName := "chat_stream"
-	groupName := "chat_group"
-	consumerName := fmt.Sprintf("server-%d", time.Now().UnixNano())
-
-	// 创建消费组（如果已存在就忽略）
-	_ = db.CreateStreamGroup(streamName, groupName)
+	lastID := user.LastMessage // 从数据库记录的 last message 开始读
 
 	go func() {
 		for {
-			// 阻塞读取 Stream 新消息
-			msgs, err := db.ReadGroupMessages(streamName, groupName, consumerName, 10, 5000)
+			msgs, err := db.ReadStreamByID(streamName, lastID, 10, 5000)
 			if err != nil {
-				fmt.Println("Stream 消费错误:", err)
+				fmt.Println("Stream read error:", err)
 				time.Sleep(time.Second)
 				continue
 			}
+
 			if len(msgs) == 0 {
 				continue
 			}
@@ -184,13 +148,15 @@ func (cm *ConnectManager) StartStreamConsumer() {
 				sender := msg.Values["sender"].(string)
 				content := msg.Values["message"].(string)
 
-				// 分发给所有在线用户
-				cm.Broadcast(sender, content)
+				m := &Msg{Sender: sender, Types: "Stream", Content: content, Target: user.Name}
 
-				// 确认消息已消费
-				err = db.AckStreamMessage(streamName, groupName, msg.ID)
-				if err != nil {
-					fmt.Println(err)
+				m.Dispatch(cm)
+
+				// 更新 LastMessage
+				lastID = msg.ID
+				user.LastMessage = lastID
+				if err := user.Update(db.DB); err != nil {
+					fmt.Println("Update last message error:", err)
 				}
 			}
 		}

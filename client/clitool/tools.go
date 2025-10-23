@@ -65,18 +65,16 @@ func Login(conn net.Conn) bool {
 
 // Recv 接收消息
 func Recv(conn net.Conn) string {
-
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("Recv panic: %v\n", err)
 		}
 	}()
-
 	for {
 		msg, err := ConnectManager.ReadMessage(conn)
 		if err != nil {
 			fmt.Println("服务器断开:", err)
-			fmt.Println("请输入/exit退出")
+			fmt.Println("发送任意消息退出")
 			break
 		}
 		fmt.Println("[收到] ", msg)
@@ -89,8 +87,9 @@ func Send(conn net.Conn, reader *bufio.Reader) {
 	for {
 		text, _ := reader.ReadString('\n')
 		text = strings.TrimSpace(text)
-		if err := ConnectManager.SendWithPrefix(conn, text); err != nil {
-			fmt.Println("发送失败:", err)
+		err := ConnectManager.SendWithPrefix(conn, text)
+		if err != nil {
+			fmt.Println("已断开连接")
 			return
 		}
 	}

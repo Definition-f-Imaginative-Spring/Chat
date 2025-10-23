@@ -9,8 +9,27 @@ import (
 
 type Msg struct {
 	Sender  string
+	Target  string
 	Types   string
 	Content string
+}
+
+// PrivateSendSystemMsg 系统私聊
+func PrivateSendSystemMsg(target, content string, cm *ConnectManager) {
+	msg := Msg{
+		Sender:  "系统",
+		Content: content,
+	}
+	msg.SendTo(target, cm)
+}
+
+// BroadcastSendSystemMsg 系统广播
+func BroadcastSendSystemMsg(content string, cm *ConnectManager) {
+	msg := Msg{
+		Sender:  "系统",
+		Content: content,
+	}
+	msg.Broadcast(cm)
 }
 
 func NewMsg(sender, types, content string) *Msg {
@@ -19,7 +38,7 @@ func NewMsg(sender, types, content string) *Msg {
 
 // SendToStream 消息加入流中
 func (m *Msg) SendToStream() {
-	if m.Types == "true" {
+	if m.Types == "broadcast" {
 		_, err := db.AddStreamMessage("chat_stream", m.Sender, m.Content)
 		if err != nil {
 			fmt.Println("写入 Redis Stream 失败:", err)
@@ -35,10 +54,10 @@ func (m *Msg) Special(conn *Connection, cm *ConnectManager) (bool, bool) {
 		return true, false
 	case "/list":
 		users := cm.ListUsers()
-		cm.SendTo(m.Sender, "系统", "在线用户: "+strings.Join(users, ", "))
+		PrivateSendSystemMsg(m.Sender, "在线用户: "+strings.Join(users, ", "), cm)
 		return true, false
 	case "/exit":
-		cm.SendTo(m.Sender, "系统", "你已退出")
+		PrivateSendSystemMsg(m.Sender, "你已退出", cm)
 		cm.RemoveUser(m.Sender)
 		return true, true
 	case "PAI":
@@ -46,10 +65,10 @@ func (m *Msg) Special(conn *Connection, cm *ConnectManager) (bool, bool) {
 		if err != nil {
 			fmt.Println("获取活跃度排名错误")
 		} else {
-			cm.SendTo(m.Sender, "系统", "活跃度排名: ")
+			PrivateSendSystemMsg(m.Sender, "活跃度排名: ", cm)
 			for idx, user := range val {
 				x := fmt.Sprintf("第%d名 %s", idx+1, user)
-				cm.SendTo(m.Sender, "系统", x)
+				PrivateSendSystemMsg(m.Sender, x, cm)
 			}
 		}
 		return true, false
@@ -59,50 +78,120 @@ func (m *Msg) Special(conn *Connection, cm *ConnectManager) (bool, bool) {
 }
 
 // ParsePrivateMessage 判断是否为私聊
-func (m *Msg) ParsePrivateMessage() (string, string, bool) {
+func (m *Msg) ParsePrivateMessage() (string, string, bool, bool) {
 	msg := strings.TrimSpace(m.Content)
 	if !strings.HasPrefix(msg, "[private]") || len(msg) <= 9 {
-		return "", "", false
+		return "", "", false, false
 	}
-
 	// 去掉 [private] 前缀
 	message := msg[9:]
 	parts := strings.SplitN(message, ":", 2)
 	if len(parts) < 2 {
-		return "", "", true
+		return "", "", true, false
 	}
 
 	targetUser := parts[0]
 	content := parts[1]
-	return targetUser, content, true
+	return targetUser, content, true, true
 }
 
-// MessageHandle 聊天消息处理
-func (m *Msg) MessageHandle(cm *ConnectManager) bool {
+// MessageHandle 确定消息类型
+func (m *Msg) MessageHandle(cm *ConnectManager) {
+	targetUser, content, isPrivate, isTrue := m.ParsePrivateMessage()
 
-	if targetUser, content, isPrivate := m.ParsePrivateMessage(); isPrivate {
-		// 私聊
-		_, ok := cm.Connections[targetUser]
-		if ok {
-			fmt.Printf("用户%s私聊%s：%s\n", m.Sender, targetUser, content)
-			m.SendToStream()
-			cm.SendTo(targetUser, m.Sender, content)
-		} else {
-			fmt.Println("不存在该用户")
-			cm.SendTo(m.Sender, "系统", fmt.Sprintf("用户%s不存在，私聊失败", targetUser))
-			return false
-		}
+	if isPrivate && isTrue {
+		m.Types = "private"
+		m.Content = content
+		m.Target = targetUser
+	}
 
+	if isPrivate && !isTrue {
+		PrivateSendSystemMsg(m.Sender, "私聊格式错误", cm)
+		m.Types = ""
+	}
+
+	if !isPrivate {
+		m.Types = "broadcast"
+	}
+}
+
+// Dispatch 消息处理
+func (m *Msg) Dispatch(cm *ConnectManager) bool {
+	switch m.Types {
+	case "private":
+		return m.HandlePrivate(cm)
+	case "broadcast":
+		return m.HandleBroadcast(cm)
+		//return m.HandleBroadcast
+	case "readStream":
+		return m.HandleStream(cm)
+	case "Stream":
+		return m.Stream(cm)
+	default:
+		fmt.Println("未知消息类型:", m.Types)
+		return false
+	}
+}
+
+// HandleBroadcast 处理广播
+func (m *Msg) HandleBroadcast(cm *ConnectManager) bool {
+	fmt.Printf("用户%s:%s\n", m.Sender, m.Content)
+	m.SendToStream()
+	err := db.IncrementRedis(m.Sender)
+	if err != nil {
+		fmt.Println("增加活跃度失败")
+		return false
+	}
+	return true
+}
+
+// HandlePrivate 处理私聊
+func (m *Msg) HandlePrivate(cm *ConnectManager) bool {
+	_, ok := cm.Connections[m.Target]
+	if ok {
+		fmt.Printf("用户%s私聊%s：%s\n", m.Sender, m.Target, m.Content)
+		m.SendTo(m.Target, cm)
 	} else {
-		fmt.Printf("用户%s:%s\n", m.Sender, m.Content)
-		m.Types = "true"
-		m.SendToStream()
+		fmt.Println("不存在该用户")
+		PrivateSendSystemMsg(m.Sender, "不存在该用户", cm)
+		return false
+	}
+	return true
+}
 
-		err := db.IncrementRedis(m.Sender)
-		if err != nil {
-			fmt.Println("增加活跃度失败")
-			return false
+// HandleStream 从流中读
+func (m *Msg) HandleStream(cm *ConnectManager) bool {
+	m.Broadcast(cm)
+	return true
+}
+
+// Broadcast 广播消息给所有用户（除了 sender）
+func (m *Msg) Broadcast(cm *ConnectManager) {
+	for username, conn := range cm.Connections {
+		select {
+		case conn.SendChan <- fmt.Sprintf("%s: %s", m.Sender, m.Content):
+		default:
+			fmt.Println("send buffer full for", username)
 		}
 	}
+}
+
+// SendTo 私聊消息
+func (m *Msg) SendTo(target string, cm *ConnectManager) {
+	conn, ok := cm.Connections[target]
+	if !ok {
+		fmt.Println("user not online:", target)
+		return
+	}
+	select {
+	case conn.SendChan <- fmt.Sprintf("[私聊]%s: %s", m.Sender, m.Content):
+	default:
+		fmt.Println("send buffer full for", target)
+	}
+}
+
+// Stream  只发给自己
+func (m *Msg) Stream(cm *ConnectManager) bool {
+	PrivateSendSystemMsg(m.Target, fmt.Sprintf("%s:%s", m.Sender, m.Content), cm)
 	return true
 }
