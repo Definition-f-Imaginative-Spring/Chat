@@ -121,12 +121,9 @@ func (m *Msg) Dispatch(cm *ConnectManager) bool {
 	case "private":
 		return m.HandlePrivate(cm)
 	case "broadcast":
-		return m.HandleBroadcast(cm)
-		//return m.HandleBroadcast
-	case "readStream":
-		return m.HandleStream(cm)
+		return m.HandleBroadcast()
 	case "Stream":
-		return m.Stream(cm)
+		return m.HandleStream(cm)
 	default:
 		fmt.Println("未知消息类型:", m.Types)
 		return false
@@ -134,7 +131,7 @@ func (m *Msg) Dispatch(cm *ConnectManager) bool {
 }
 
 // HandleBroadcast 处理广播
-func (m *Msg) HandleBroadcast(cm *ConnectManager) bool {
+func (m *Msg) HandleBroadcast() bool {
 	fmt.Printf("用户%s:%s\n", m.Sender, m.Content)
 	m.SendToStream()
 	err := db.IncrementRedis(m.Sender)
@@ -156,12 +153,6 @@ func (m *Msg) HandlePrivate(cm *ConnectManager) bool {
 		PrivateSendSystemMsg(m.Sender, "不存在该用户", cm)
 		return false
 	}
-	return true
-}
-
-// HandleStream 从流中读
-func (m *Msg) HandleStream(cm *ConnectManager) bool {
-	m.Broadcast(cm)
 	return true
 }
 
@@ -190,8 +181,22 @@ func (m *Msg) SendTo(target string, cm *ConnectManager) {
 	}
 }
 
-// Stream  只发给自己
-func (m *Msg) Stream(cm *ConnectManager) bool {
-	PrivateSendSystemMsg(m.Target, fmt.Sprintf("%s:%s", m.Sender, m.Content), cm)
+// Stream 只发送自己
+func (m *Msg) Stream(target string, cm *ConnectManager) {
+	conn, ok := cm.Connections[target]
+	if !ok {
+		fmt.Println("user not online:", target)
+		return
+	}
+	select {
+	case conn.SendChan <- fmt.Sprintf("%s: %s", m.Sender, m.Content):
+	default:
+		fmt.Println("send buffer full for", target)
+	}
+}
+
+// HandleStream 处理stream
+func (m *Msg) HandleStream(cm *ConnectManager) bool {
+	m.Stream(m.Target, cm)
 	return true
 }

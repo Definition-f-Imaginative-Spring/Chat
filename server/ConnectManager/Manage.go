@@ -3,6 +3,7 @@ package ConnectManager
 import (
 	"Chat/db"
 	"fmt"
+	"github.com/redis/go-redis/v9"
 	"strings"
 	"sync"
 	"time"
@@ -34,6 +35,7 @@ func (cm *ConnectManager) AddUser(username string, co *Connection) bool {
 	go cm.ListenRecv(co)
 
 	BroadcastSendSystemMsg(fmt.Sprintf("%s 上线了", username), cm)
+	BroadcastSendSystemMsg(fmt.Sprintf("以下的直接输出为历史消息"), cm)
 
 	return true
 }
@@ -131,6 +133,10 @@ func (cm *ConnectManager) StartStreamConsumer(user *db.User) {
 	streamName := "chat_stream"
 	lastID := user.LastMessage // 从数据库记录的 last message 开始读
 
+	if lastID == "" {
+		lastID = "0"
+	}
+
 	go func() {
 		for {
 			msgs, err := db.ReadStreamByID(streamName, lastID, 10, 5000)
@@ -143,22 +149,31 @@ func (cm *ConnectManager) StartStreamConsumer(user *db.User) {
 			if len(msgs) == 0 {
 				continue
 			}
-
-			for _, msg := range msgs {
-				sender := msg.Values["sender"].(string)
-				content := msg.Values["message"].(string)
-
-				m := &Msg{Sender: sender, Types: "Stream", Content: content, Target: user.Name}
-
-				m.Dispatch(cm)
-
-				// 更新 LastMessage
-				lastID = msg.ID
-				user.LastMessage = lastID
-				if err := user.Update(db.DB); err != nil {
-					fmt.Println("Update last message error:", err)
-				}
-			}
+			lastID = cm.HandleMessage(user, lastID, msgs)
 		}
 	}()
+}
+
+// HandleMessage 处理消息集
+func (cm *ConnectManager) HandleMessage(user *db.User, lastID string, msgs []redis.XMessage) string {
+	for _, msg := range msgs {
+		sender := msg.Values["sender"].(string)
+		content := msg.Values["message"].(string)
+
+		m := &Msg{
+			Sender:  sender,
+			Types:   "Stream",
+			Content: content,
+			Target:  user.Name,
+		}
+		m.Dispatch(cm)
+
+		// 更新 LastMessage
+		lastID = msg.ID
+		user.LastMessage = lastID
+		if err := user.Update(db.DB); err != nil {
+			fmt.Println("Update last message error:", err)
+		}
+	}
+	return lastID
 }

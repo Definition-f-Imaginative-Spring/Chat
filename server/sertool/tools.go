@@ -59,7 +59,13 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		return
 	}
 
+	message, err := user.GetLastMessage(db.DB)
+	if err != nil {
+		fmt.Println(err)
+	}
+	user.LastMessage = message
 	fmt.Println("新用户连接:", user.Name)
+	go manager.StartStreamConsumer(user)
 
 }
 
