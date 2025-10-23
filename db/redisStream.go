@@ -47,3 +47,18 @@ func ReadStreamByID(streamName string, lastID string, count int64, blockMs int64
 	}
 	return streams[0].Messages, nil
 }
+
+// AutoTrimStream 定期检查并修剪流，保留最多 maxLen 条消息
+func AutoTrimStream(streamName string, maxLen int64, interval time.Duration) {
+	ticker := time.NewTicker(interval)
+
+	go func() {
+		for range ticker.C {
+			// XTrim 可以直接自动删除最老的消息
+			_, err := Rdb.XTrimMaxLen(streamCtx, streamName, maxLen).Result()
+			if err != nil {
+				fmt.Printf("Failed to trim stream %s: %v\n", streamName, err)
+			}
+		}
+	}()
+}

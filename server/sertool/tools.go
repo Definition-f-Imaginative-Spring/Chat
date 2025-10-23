@@ -168,6 +168,7 @@ func UserCreate(conn net.Conn) (user *db.User, bo bool) {
 func StartServer(listener net.Listener) {
 	manager := ConnectManager.NewConnectManager()
 	manager.StartTimeoutChecker(10*time.Second, 30)
+	db.AutoTrimStream("chat_stream", 100, 30*time.Second)
 	for {
 		conn, err := listener.Accept()
 		if err != nil {

@@ -85,11 +85,12 @@ func main() {
 		}
 	}(conn)
 
+	quitChan := make(chan struct{})
 	go clitool.StartHeartbeat(conn, 10*time.Second)
 
 	// 接收消息
-	go clitool.Recv(conn)
+	go clitool.Recv(conn, quitChan)
 
 	// 发送消息
-	clitool.Send(conn, reader)
+	clitool.Send(conn, reader, quitChan)
 }

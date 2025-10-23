@@ -38,12 +38,12 @@ func NewMsg(sender, types, content string) *Msg {
 
 // SendToStream 消息加入流中
 func (m *Msg) SendToStream() {
-	if m.Types == "broadcast" {
-		_, err := db.AddStreamMessage("chat_stream", m.Sender, m.Content)
-		if err != nil {
-			fmt.Println("写入 Redis Stream 失败:", err)
-		}
+
+	_, err := db.AddStreamMessage("chat_stream", m.Sender, m.Content)
+	if err != nil {
+		fmt.Println("写入 Redis Stream 失败:", err)
 	}
+
 }
 
 // Special 特殊消息处理

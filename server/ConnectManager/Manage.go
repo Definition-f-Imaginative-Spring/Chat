@@ -104,18 +104,15 @@ func (cm *ConnectManager) ListUsers() []string {
 
 // StartTimeoutChecker 启动超时检测
 func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec int64) {
-	ticker := time.NewTicker(interval)
+	ticker := time.NewTicker(interval) //每隔固定时间发送一个信号
 	go func() {
-
 		defer func() {
 			if err := recover(); err != nil {
 				fmt.Printf("TimeoutChecker panic: %v\n", err)
 			}
 		}()
-
 		for range ticker.C {
 			now := time.Now().Unix()
-
 			for username, conn := range cm.Connections {
 				if now-conn.LastSeen > timeoutSec {
 					fmt.Printf("用户 %s 超时未响应，强制下线\n", username)

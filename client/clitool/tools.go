@@ -64,16 +64,18 @@ func Login(conn net.Conn) bool {
 }
 
 // Recv 接收消息
-func Recv(conn net.Conn) string {
+func Recv(conn net.Conn, quitChan chan struct{}) string {
+
 	defer func() {
 		if err := recover(); err != nil {
 			fmt.Printf("Recv panic: %v\n", err)
 		}
+		close(quitChan)
 	}()
 	for {
 		msg, err := ConnectManager.ReadMessage(conn)
 		if err != nil {
-			fmt.Println("服务器断开:", err)
+			fmt.Println("服务器已断开:")
 			fmt.Println("发送任意消息退出")
 			break
 		}
@@ -83,14 +85,22 @@ func Recv(conn net.Conn) string {
 }
 
 // Send 消息处理
-func Send(conn net.Conn, reader *bufio.Reader) {
+func Send(conn net.Conn, reader *bufio.Reader, quitChan chan struct{}) {
 	for {
-		text, _ := reader.ReadString('\n')
-		text = strings.TrimSpace(text)
-		err := ConnectManager.SendWithPrefix(conn, text)
-		if err != nil {
-			fmt.Println("已断开连接")
+		select {
+		case <-quitChan:
 			return
+		default:
+			text, _ := reader.ReadString('\n')
+			text = strings.TrimSpace(text)
+			if text == "" {
+				continue
+			}
+			err := ConnectManager.SendWithPrefix(conn, text)
+			if err != nil {
+				fmt.Println("已断开连接")
+				return
+			}
 		}
 	}
 }
