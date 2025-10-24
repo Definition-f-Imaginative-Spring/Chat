@@ -12,17 +12,19 @@ import (
 type ConnectManager struct {
 	Connections map[string]*Connection
 	Mutex       sync.Mutex
+	Users       map[string]*db.User
 }
 
 // NewConnectManager 创建 ConnectManager 实例
 func NewConnectManager() *ConnectManager {
 	return &ConnectManager{
 		Connections: make(map[string]*Connection),
+		Users:       make(map[string]*db.User),
 	}
 }
 
 // AddUser 添加新用户
-func (cm *ConnectManager) AddUser(username string, co *Connection) bool {
+func (cm *ConnectManager) AddUser(username string, co *Connection, user *db.User) bool {
 	cm.Mutex.Lock()
 	defer cm.Mutex.Unlock()
 
@@ -32,10 +34,11 @@ func (cm *ConnectManager) AddUser(username string, co *Connection) bool {
 
 	co.Username = username
 	cm.Connections[username] = co
+	cm.Users[username] = user
 	go cm.ListenRecv(co)
 
 	BroadcastSendSystemMsg(fmt.Sprintf("%s 上线了", username), cm)
-	BroadcastSendSystemMsg(fmt.Sprintf("以下的直接输出为历史消息"), cm)
+	PrivateSendSystemMsg(username, fmt.Sprintf("以下的直接输出为历史消息"), cm)
 
 	return true
 }
@@ -51,6 +54,7 @@ func (cm *ConnectManager) RemoveUser(username string) {
 		return
 	}
 	delete(cm.Connections, username)
+	delete(cm.Users, username)
 	conn.Close()
 	BroadcastSendSystemMsg(fmt.Sprintf("%s 下线了", username), cm)
 }
@@ -117,6 +121,7 @@ func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec
 				if now-conn.LastSeen > timeoutSec {
 					fmt.Printf("用户 %s 超时未响应，强制下线\n", username)
 					delete(cm.Connections, username)
+					delete(cm.Users, username)
 					conn.Close()
 				}
 			}
@@ -173,4 +178,65 @@ func (cm *ConnectManager) HandleMessage(user *db.User, lastID string, msgs []red
 		}
 	}
 	return lastID
+}
+
+// HistoryMessage 读取历史消息
+func (cm *ConnectManager) HistoryMessage(user *db.User) {
+	streamName := "chat_stream"
+	lastID := user.LastMessage // 从数据库记录的 last message 开始读
+
+	if lastID == "" {
+		lastID = "0"
+	}
+
+	msgs, err := db.ReadStreamByID(streamName, lastID, 100, 5000)
+	if err != nil {
+		fmt.Println("Stream read error:", err)
+		return
+	}
+
+	if len(msgs) == 0 {
+		return
+	}
+
+	lastID = cm.HandleMessage(user, lastID, msgs)
+	user.LastMessage = lastID
+}
+
+// StartStreamConsumerBroadcast 从流中消费消息，并广播给所有在线用户
+func (cm *ConnectManager) StartStreamConsumerBroadcast() {
+	streamName := "chat_stream"
+	lastID := "$" // 从最新消息开始，不读取历史
+
+	go func() {
+		for {
+			msgs, err := db.ReadStreamByID(streamName, lastID, 10, 5000)
+			if err != nil {
+				fmt.Println("Stream read error:", err)
+				time.Sleep(time.Second)
+				continue
+			}
+			if len(msgs) == 0 {
+				continue
+			}
+			cm.Mutex.Lock()
+			for _, msg := range msgs {
+				// 将消息封装成 Msg 对象
+				m := &Msg{
+					Sender:  msg.Values["sender"].(string),
+					Content: msg.Values["message"].(string),
+				}
+
+				// 使用 Broadcast 方法广播
+				m.Broadcast(cm)
+
+				// 更新每个用户自己的 lastMessage
+				for _, user := range cm.Users {
+					user.LastMessage = msg.ID
+				}
+			}
+			cm.Mutex.Unlock()
+
+		}
+	}()
 }

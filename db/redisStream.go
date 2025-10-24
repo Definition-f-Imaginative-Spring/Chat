@@ -26,7 +26,7 @@ func AddStreamMessage(streamName string, sender string, msg string) (string, err
 	return id, nil
 }
 
-// ReadStreamByID 从流中读取
+// ReadStreamByID 从流中读取历史消息
 func ReadStreamByID(streamName string, lastID string, count int64, blockMs int64) ([]redis.XMessage, error) {
 	if lastID == "" {
 		lastID = "0" // 从最早消息开始读
@@ -51,7 +51,6 @@ func ReadStreamByID(streamName string, lastID string, count int64, blockMs int64
 // AutoTrimStream 定期检查并修剪流，保留最多 maxLen 条消息
 func AutoTrimStream(streamName string, maxLen int64, interval time.Duration) {
 	ticker := time.NewTicker(interval)
-
 	go func() {
 		for range ticker.C {
 			// XTrim 可以直接自动删除最老的消息

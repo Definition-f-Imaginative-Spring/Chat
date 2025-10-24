@@ -38,12 +38,10 @@ func NewMsg(sender, types, content string) *Msg {
 
 // SendToStream 消息加入流中
 func (m *Msg) SendToStream() {
-
 	_, err := db.AddStreamMessage("chat_stream", m.Sender, m.Content)
 	if err != nil {
 		fmt.Println("写入 Redis Stream 失败:", err)
 	}
-
 }
 
 // Special 特殊消息处理
@@ -156,7 +154,7 @@ func (m *Msg) HandlePrivate(cm *ConnectManager) bool {
 	return true
 }
 
-// Broadcast 广播消息给所有用户（除了 sender）
+// Broadcast 广播消息给所有用户
 func (m *Msg) Broadcast(cm *ConnectManager) {
 	for username, conn := range cm.Connections {
 		select {

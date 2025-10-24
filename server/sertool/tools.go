@@ -51,7 +51,7 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 
 	c := ConnectManager.NewConnection(conn)
 
-	manager.AddUser(user.Name, c)
+	manager.AddUser(user.Name, c, user)
 
 	err = db.InsertRedis(user.Name)
 	if err != nil {
@@ -65,7 +65,7 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 	}
 	user.LastMessage = message
 	fmt.Println("新用户连接:", user.Name)
-	go manager.StartStreamConsumer(user)
+	manager.HistoryMessage(user)
 
 }
 
@@ -94,7 +94,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		}
 		c := ConnectManager.NewConnection(conn)
 
-		manager.AddUser(user.Name, c)
+		manager.AddUser(user.Name, c, user)
 
 		fmt.Println("欢迎:", user.Name)
 
@@ -105,7 +105,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		user.LastMessage = message
 
 		fmt.Println(user.LastMessage)
-		go manager.StartStreamConsumer(user)
+		manager.HistoryMessage(user)
 
 	} else {
 		err := ConnectManager.SendWithPrefix(conn, "密码或用户名错误")
@@ -119,7 +119,6 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 			return
 		}
 	}
-
 }
 
 // Close  关闭conn
@@ -169,6 +168,7 @@ func StartServer(listener net.Listener) {
 	manager := ConnectManager.NewConnectManager()
 	manager.StartTimeoutChecker(10*time.Second, 30)
 	db.AutoTrimStream("chat_stream", 100, 30*time.Second)
+	go manager.StartStreamConsumerBroadcast()
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
