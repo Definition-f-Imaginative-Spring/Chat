@@ -61,3 +61,16 @@ func AutoTrimStream(streamName string, maxLen int64, interval time.Duration) {
 		}
 	}()
 }
+
+// GetLatestStreamID 返回流中最新消息的 ID
+func GetLatestStreamID(streamName string) (string, error) {
+	msgs, err := Rdb.XRevRangeN(streamCtx, streamName, "+", "-", 1).Result()
+	if err != nil {
+		return "", fmt.Errorf("failed to get latest message: %v", err)
+	}
+
+	if len(msgs) == 0 {
+		return "0-0", nil // 流为空
+	}
+	return msgs[0].ID, nil
+}

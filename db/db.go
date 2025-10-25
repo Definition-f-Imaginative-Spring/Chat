@@ -121,15 +121,6 @@ func (U *User) Boolean(db *sql.DB) (bool, error) {
 	return U.Password == password, nil
 }
 
-// Update 更新最后一条消息
-func (U *User) Update(db *sql.DB) error {
-	_, err := db.Exec("UPDATE user SET Last_Message = ? WHERE Name = ?", U.LastMessage, U.Name)
-	if err != nil {
-		return fmt.Errorf("DB update error: %v", err)
-	}
-	return nil
-}
-
 // GetLastMessage 得到记录的消息ID
 func (U *User) GetLastMessage(db *sql.DB) (string, error) {
 	var lastMsg string
@@ -140,4 +131,13 @@ func (U *User) GetLastMessage(db *sql.DB) (string, error) {
 	}
 	U.LastMessage = lastMsg
 	return lastMsg, nil
+}
+
+// UpdateMessage 更新消息
+func UpdateMessage(db *sql.DB, lastID, username string) error {
+	_, err := db.Exec("UPDATE user SET Last_Message = ? WHERE Name = ?", lastID, username)
+	if err != nil {
+		return fmt.Errorf("DB update error: %v", err)
+	}
+	return nil
 }

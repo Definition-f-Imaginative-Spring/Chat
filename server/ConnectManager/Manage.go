@@ -12,19 +12,17 @@ import (
 type ConnectManager struct {
 	Connections map[string]*Connection
 	Mutex       sync.Mutex
-	Users       map[string]*db.User
 }
 
 // NewConnectManager 创建 ConnectManager 实例
 func NewConnectManager() *ConnectManager {
 	return &ConnectManager{
 		Connections: make(map[string]*Connection),
-		Users:       make(map[string]*db.User),
 	}
 }
 
 // AddUser 添加新用户
-func (cm *ConnectManager) AddUser(username string, co *Connection, user *db.User) bool {
+func (cm *ConnectManager) AddUser(username string, co *Connection) bool {
 	cm.Mutex.Lock()
 	defer cm.Mutex.Unlock()
 
@@ -34,11 +32,9 @@ func (cm *ConnectManager) AddUser(username string, co *Connection, user *db.User
 
 	co.Username = username
 	cm.Connections[username] = co
-	cm.Users[username] = user
 	go cm.ListenRecv(co)
 
 	BroadcastSendSystemMsg(fmt.Sprintf("%s 上线了", username), cm)
-	PrivateSendSystemMsg(username, fmt.Sprintf("以下的直接输出为历史消息"), cm)
 
 	return true
 }
@@ -48,13 +44,24 @@ func (cm *ConnectManager) RemoveUser(username string) {
 	cm.Mutex.Lock()
 	defer cm.Mutex.Unlock()
 
+	id, err := db.GetLatestStreamID("chat_stream")
+	if err != nil {
+		fmt.Println("得到最后消息出错", err)
+		return
+	}
+	err = db.UpdateMessage(db.DB, id, username)
+	if err != nil {
+		fmt.Println("更新最后消息出错", err)
+		return
+	}
+
 	conn, exists := cm.Connections[username]
 	if !exists {
 		fmt.Println("用户不存在")
 		return
 	}
+
 	delete(cm.Connections, username)
-	delete(cm.Users, username)
 	conn.Close()
 	BroadcastSendSystemMsg(fmt.Sprintf("%s 下线了", username), cm)
 }
@@ -117,46 +124,24 @@ func (cm *ConnectManager) StartTimeoutChecker(interval time.Duration, timeoutSec
 		}()
 		for range ticker.C {
 			now := time.Now().Unix()
+			cm.Mutex.Lock()
+			var timeoutUsers []string
 			for username, conn := range cm.Connections {
 				if now-conn.LastSeen > timeoutSec {
-					fmt.Printf("用户 %s 超时未响应，强制下线\n", username)
-					delete(cm.Connections, username)
-					delete(cm.Users, username)
-					conn.Close()
+					timeoutUsers = append(timeoutUsers, username)
 				}
 			}
+			cm.Mutex.Unlock()
 
+			for _, username := range timeoutUsers {
+				fmt.Printf("用户 %s 超时未响应，强制下线\n", username)
+				cm.RemoveUser(username)
+			}
 		}
 	}()
 }
 
-// StartStreamConsumer 消费流中消息
-func (cm *ConnectManager) StartStreamConsumer(user *db.User) {
-	streamName := "chat_stream"
-	lastID := user.LastMessage // 从数据库记录的 last message 开始读
-
-	if lastID == "" {
-		lastID = "0"
-	}
-
-	go func() {
-		for {
-			msgs, err := db.ReadStreamByID(streamName, lastID, 10, 5000)
-			if err != nil {
-				fmt.Println("Stream read error:", err)
-				time.Sleep(time.Second)
-				continue
-			}
-
-			if len(msgs) == 0 {
-				continue
-			}
-			lastID = cm.HandleMessage(user, lastID, msgs)
-		}
-	}()
-}
-
-// HandleMessage 处理消息集
+// HandleMessage 处理历史消息集
 func (cm *ConnectManager) HandleMessage(user *db.User, lastID string, msgs []redis.XMessage) string {
 	for _, msg := range msgs {
 		sender := msg.Values["sender"].(string)
@@ -173,8 +158,10 @@ func (cm *ConnectManager) HandleMessage(user *db.User, lastID string, msgs []red
 		// 更新 LastMessage
 		lastID = msg.ID
 		user.LastMessage = lastID
-		if err := user.Update(db.DB); err != nil {
-			fmt.Println("Update last message error:", err)
+		err := db.UpdateMessage(db.DB, lastID, user.Name)
+		if err != nil {
+			fmt.Println("更新历史消息失败", err)
+			return lastID
 		}
 	}
 	return lastID
@@ -206,8 +193,7 @@ func (cm *ConnectManager) HistoryMessage(user *db.User) {
 // StartStreamConsumerBroadcast 从流中消费消息，并广播给所有在线用户
 func (cm *ConnectManager) StartStreamConsumerBroadcast() {
 	streamName := "chat_stream"
-	lastID := "$" // 从最新消息开始，不读取历史
-
+	lastID := "$"
 	go func() {
 		for {
 			msgs, err := db.ReadStreamByID(streamName, lastID, 10, 5000)
@@ -219,24 +205,44 @@ func (cm *ConnectManager) StartStreamConsumerBroadcast() {
 			if len(msgs) == 0 {
 				continue
 			}
+			cm.HandleStream(msgs)
+		}
+	}()
+}
+
+// HandleStream 处理新消息
+func (cm *ConnectManager) HandleStream(msgs []redis.XMessage) {
+	for _, msg := range msgs {
+		// 将消息封装成 Msg 对象
+		m := &Msg{
+			Sender:  msg.Values["sender"].(string),
+			Content: msg.Values["message"].(string),
+		}
+		m.Broadcast(cm)
+	}
+}
+
+// StartLastMessageFlusher 定期更新消息
+func (cm *ConnectManager) StartLastMessageFlusher(interval time.Duration) {
+	go func() {
+		ticker := time.NewTicker(interval)
+		for range ticker.C {
+			id, err := db.GetLatestStreamID("chat_stream")
+			if err != nil {
+				fmt.Println("得到最新ID失败", err)
+				return
+			}
+
 			cm.Mutex.Lock()
-			for _, msg := range msgs {
-				// 将消息封装成 Msg 对象
-				m := &Msg{
-					Sender:  msg.Values["sender"].(string),
-					Content: msg.Values["message"].(string),
-				}
-
-				// 使用 Broadcast 方法广播
-				m.Broadcast(cm)
-
-				// 更新每个用户自己的 lastMessage
-				for _, user := range cm.Users {
-					user.LastMessage = msg.ID
-				}
+			users := make([]string, 0, len(cm.Connections))
+			for user := range cm.Connections {
+				users = append(users, user)
 			}
 			cm.Mutex.Unlock()
 
+			for _, username := range users {
+				_ = db.UpdateMessage(db.DB, id, username)
+			}
 		}
 	}()
 }

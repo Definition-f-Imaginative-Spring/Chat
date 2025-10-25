@@ -51,7 +51,7 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 
 	c := ConnectManager.NewConnection(conn)
 
-	manager.AddUser(user.Name, c, user)
+	manager.AddUser(user.Name, c)
 
 	err = db.InsertRedis(user.Name)
 	if err != nil {
@@ -66,7 +66,6 @@ func Register(conn net.Conn, manager *ConnectManager.ConnectManager) {
 	user.LastMessage = message
 	fmt.Println("新用户连接:", user.Name)
 	manager.HistoryMessage(user)
-
 }
 
 // Login 登录
@@ -94,7 +93,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 		}
 		c := ConnectManager.NewConnection(conn)
 
-		manager.AddUser(user.Name, c, user)
+		manager.AddUser(user.Name, c)
 
 		fmt.Println("欢迎:", user.Name)
 
@@ -106,6 +105,7 @@ func Login(conn net.Conn, manager *ConnectManager.ConnectManager) {
 
 		fmt.Println(user.LastMessage)
 		manager.HistoryMessage(user)
+		ConnectManager.PrivateSendSystemMsg(user.Name, fmt.Sprintf("以上的直接输出为历史消息"), manager)
 
 	} else {
 		err := ConnectManager.SendWithPrefix(conn, "密码或用户名错误")
